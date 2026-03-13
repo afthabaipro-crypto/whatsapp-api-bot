@@ -6,8 +6,8 @@ const app = express();
 app.use(express.json());
 
 let sock;
-let currentQR = "";       // Stores the latest QR code
-let isConnected = false;  // Tracks if WhatsApp is connected
+let currentQR = "";       
+let isConnected = false;  
 
 async function connectToWhatsApp() {
     const { version } = await fetchLatestBaileysVersion();
@@ -17,7 +17,7 @@ async function connectToWhatsApp() {
         version,
         auth: state,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: false // We don't need the terminal QR anymore!
+        printQRInTerminal: false
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -25,10 +25,7 @@ async function connectToWhatsApp() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         
-        // If a new QR code is generated, save it in the variable
-        if (qr) {
-            currentQR = qr;
-        }
+        if (qr) currentQR = qr;
 
         if (connection === 'close') {
             isConnected = false;
@@ -40,7 +37,7 @@ async function connectToWhatsApp() {
             }
         } else if (connection === 'open') { 
             isConnected = true;
-            currentQR = ""; // Clear the QR once connected
+            currentQR = ""; 
             console.log('✅ WhatsApp is successfully connected!'); 
         }
     });
@@ -48,12 +45,16 @@ async function connectToWhatsApp() {
 
 connectToWhatsApp();
 
-// NEW: Endpoint for your PHP Dashboard to check the status & get the QR
 app.get('/status', (req, res) => {
     res.json({ connected: isConnected, qr: currentQR });
 });
 
 app.post('/send-message', async (req, res) => {
+    // NEW: If not connected, instantly tell PHP to queue the message!
+    if (!isConnected || !sock) {
+        return res.status(503).json({ success: false, error: 'WhatsApp is currently disconnected.' });
+    }
+
     const { number, message } = req.body;
     try {
         const jid = `${number}@s.whatsapp.net`;
