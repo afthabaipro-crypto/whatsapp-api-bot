@@ -1,25 +1,23 @@
 const express = require('express');
 const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal');
 
 const app = express();
 app.use(express.json());
 
 let sock;
+let currentQR = "";       // Stores the latest QR code
+let isConnected = false;  // Tracks if WhatsApp is connected
 
 async function connectToWhatsApp() {
-    // This line fixes the loop! It fetches the latest WhatsApp version.
-    const { version, isLatest } = await fetchLatestBaileysVersion();
-    console.log(`Connecting to WhatsApp v${version.join('.')}...`);
-    
+    const { version } = await fetchLatestBaileysVersion();
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     
     sock = makeWASocket({
         version,
         auth: state,
         logger: pino({ level: 'silent' }),
-        printQRInTerminal: false
+        printQRInTerminal: false // We don't need the terminal QR anymore!
     });
 
     sock.ev.on('creds.update', saveCreds);
@@ -27,30 +25,33 @@ async function connectToWhatsApp() {
     sock.ev.on('connection.update', (update) => {
         const { connection, lastDisconnect, qr } = update;
         
+        // If a new QR code is generated, save it in the variable
         if (qr) {
-            console.log("\n=========================================");
-            console.log("📱 SCAN THIS QR CODE WITH YOUR WHATSAPP:");
-            console.log("=========================================\n");
-            qrcode.generate(qr, { small: true });
+            currentQR = qr;
         }
 
         if (connection === 'close') {
+            isConnected = false;
             const reason = lastDisconnect.error?.output?.statusCode;
-            console.log("Connection closed. Reason Code:", reason);
-            
             if (reason !== DisconnectReason.loggedOut) {
-                console.log("Reconnecting in 5 seconds...");
-                setTimeout(connectToWhatsApp, 5000); // 5 second delay stops the spam
+                setTimeout(connectToWhatsApp, 5000); 
             } else {
-                console.log("Logged out. Please restart the server.");
+                currentQR = "";
             }
         } else if (connection === 'open') { 
-            console.log('✅ WhatsApp is successfully connected and ready!'); 
+            isConnected = true;
+            currentQR = ""; // Clear the QR once connected
+            console.log('✅ WhatsApp is successfully connected!'); 
         }
     });
 }
 
 connectToWhatsApp();
+
+// NEW: Endpoint for your PHP Dashboard to check the status & get the QR
+app.get('/status', (req, res) => {
+    res.json({ connected: isConnected, qr: currentQR });
+});
 
 app.post('/send-message', async (req, res) => {
     const { number, message } = req.body;
