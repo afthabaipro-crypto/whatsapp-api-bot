@@ -1,6 +1,7 @@
 const express = require('express');
 const { default: makeWASocket, useMultiFileAuthState } = require('@whiskeysockets/baileys');
 const pino = require('pino');
+const qrcode = require('qrcode-terminal'); // We added this!
 
 const app = express();
 app.use(express.json());
@@ -8,19 +9,23 @@ app.use(express.json());
 let sock;
 
 async function connectToWhatsApp() {
-    // This creates a folder to save your WhatsApp login session
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     
     sock = makeWASocket({
         auth: state,
-        logger: pino({ level: 'silent' }),
-        printQRInTerminal: true // This will show the QR code in Render's logs
+        logger: pino({ level: 'silent' }) // We removed the deprecated option here
     });
 
     sock.ev.on('creds.update', saveCreds);
     sock.ev.on('connection.update', (update) => {
         const { connection, qr } = update;
-        if (qr) console.log("SCAN THIS QR CODE WITH WHATSAPP!");
+        
+        // When WhatsApp sends the QR code, we print it using our new library
+        if (qr) {
+            console.log("📱 SCAN THIS QR CODE WITH YOUR WHATSAPP:");
+            qrcode.generate(qr, { small: true });
+        }
+
         if (connection === 'close') {
             console.log("Connection closed, reconnecting...");
             connectToWhatsApp(); 
@@ -32,7 +37,6 @@ async function connectToWhatsApp() {
 
 connectToWhatsApp();
 
-// This is the door your InfinityFree PHP website will knock on
 app.post('/send-message', async (req, res) => {
     const { number, message } = req.body;
     try {
@@ -44,6 +48,5 @@ app.post('/send-message', async (req, res) => {
     }
 });
 
-// Render gives us a dynamic PORT, so we must use process.env.PORT
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
