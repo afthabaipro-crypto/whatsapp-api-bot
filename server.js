@@ -1,7 +1,7 @@
 const express = require('express');
-const { default: makeWASocket, useMultiFileAuthState } = require('@whiskeysockets/baileys');
+const { default: makeWASocket, useMultiFileAuthState, DisconnectReason, fetchLatestBaileysVersion } = require('@whiskeysockets/baileys');
 const pino = require('pino');
-const qrcode = require('qrcode-terminal'); // We added this!
+const qrcode = require('qrcode-terminal');
 
 const app = express();
 app.use(express.json());
@@ -9,26 +9,41 @@ app.use(express.json());
 let sock;
 
 async function connectToWhatsApp() {
+    // This line fixes the loop! It fetches the latest WhatsApp version.
+    const { version, isLatest } = await fetchLatestBaileysVersion();
+    console.log(`Connecting to WhatsApp v${version.join('.')}...`);
+    
     const { state, saveCreds } = await useMultiFileAuthState('auth_info_baileys');
     
     sock = makeWASocket({
+        version,
         auth: state,
-        logger: pino({ level: 'silent' }) // We removed the deprecated option here
+        logger: pino({ level: 'silent' }),
+        printQRInTerminal: false
     });
 
     sock.ev.on('creds.update', saveCreds);
+
     sock.ev.on('connection.update', (update) => {
-        const { connection, qr } = update;
+        const { connection, lastDisconnect, qr } = update;
         
-        // When WhatsApp sends the QR code, we print it using our new library
         if (qr) {
+            console.log("\n=========================================");
             console.log("📱 SCAN THIS QR CODE WITH YOUR WHATSAPP:");
+            console.log("=========================================\n");
             qrcode.generate(qr, { small: true });
         }
 
         if (connection === 'close') {
-            console.log("Connection closed, reconnecting...");
-            connectToWhatsApp(); 
+            const reason = lastDisconnect.error?.output?.statusCode;
+            console.log("Connection closed. Reason Code:", reason);
+            
+            if (reason !== DisconnectReason.loggedOut) {
+                console.log("Reconnecting in 5 seconds...");
+                setTimeout(connectToWhatsApp, 5000); // 5 second delay stops the spam
+            } else {
+                console.log("Logged out. Please restart the server.");
+            }
         } else if (connection === 'open') { 
             console.log('✅ WhatsApp is successfully connected and ready!'); 
         }
